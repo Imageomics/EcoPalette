@@ -1,0 +1,220 @@
+---
+title: "Beetlepalozza"
+author: "Brennan Hays, Alyson East"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+# Load required libraries
+library(neonUtilities)  # For accessing NEON data
+library(dplyr)          # For data manipulation
+library(tidyr)          # For tidying data
+
+# Read in CSV files containing beetle measurements and individual metadata
+beetles_measurements <- read.csv("BeetleMeasurements.csv")
+beetles_individual_metadata <- read.csv("individual_metadata.csv")
+
+# Generate a list of unique site IDs from the beetle measurements data
+unique(beetles_measurements$siteID)
+
+# Calculate the count of rows (measurements) for each site ID
+beetles_site_count <- beetles_measurements %>%
+  group_by(siteID) %>%
+  summarise(count = n())  # Summarize the counts for each site
+```
+
+```{r}
+# NEON access token - used for authenticating with NEON's API
+NEON_TOKEN<-"eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJhdWQiOiJodHRwczovL2RhdGEubmVvbnNjaWVuY2Uub3JnL2FwaS92MC8iLCJzdWIiOiJhLmVhc3QuZWNvbG9neUBnbWFpbC5jb20iLCJzY29wZSI6InJhdGU6cHVibGljIiwiaXNzIjoiaHR0cHM6Ly9kYXRhLm5lb25zY2llbmNlLm9yZy8iLCJleHAiOjE4ODEyNDQ4NjksImlhdCI6MTcyMzU2NDg2OSwiZW1haWwiOiJhLmVhc3QuZWNvbG9neUBnbWFpbC5jb20ifQ.7_3KNAwtmIVg6pY5ptRw8bvQrHF6wSnzRox2qRZTIsIyoNTJfoHRMo5oMtw-9KAbauIj72npKPtyWZ4l2FugWA"
+```
+
+```{r}
+# Define reduced list of site IDs for which data will be pulled
+beetles_reduced_site <- c('BART', 'BLAN', 'GRSM', 'HARV', 'KONA', 'MLBS', 'NIWO', 'NOGP', 'RMNP', 'SERC', 'STEI', 'STER', 'UNDE')
+
+# Set date range for filtering the data (can be left blank if not needed)
+beetles_start_date <- "2018-01"
+beetles_end_date <- "2018-12"
+
+# Set time interval for the data in minutes (e.g., 30 minutes)
+beetles_timeIndex <- 30
+
+# Define the data product IDs for humidity, temperature, and precipitation data from NEON
+humidity_dpID <- "DP1.00098.001"
+temperature_IR_dpID <- "DP1.00005.001"
+precipitation_dpID <- "DP1.00006.001"
+
+# Download humidity data from NEON for the selected sites and date range
+beetles_humidity <- neonUtilities::loadByProduct(
+  dpID = humidity_dpID,
+  site = beetles_reduced_site,
+  startdate = beetles_start_date,
+  enddate = beetles_end_date,
+  timeIndex = beetles_timeIndex,
+  token = NEON_TOKEN
+)
+
+# Download temperature data (IR) from NEON for the selected sites and date range
+beetles_temperature_IR <- neonUtilities::loadByProduct(
+  dpID = temperature_IR_dpID,
+  site = beetles_reduced_site,
+  startdate = beetles_start_date,
+  enddate = beetles_end_date,
+  timeIndex = beetles_timeIndex,
+  token = NEON_TOKEN
+)
+
+# Download precipitation data from NEON for the selected sites and date range
+beetles_precipitation <- neonUtilities::loadByProduct(
+  dpID = precipitation_dpID,
+  site = beetles_reduced_site,
+  startdate = beetles_start_date,
+  enddate = beetles_end_date,
+  timeIndex = beetles_timeIndex,
+  token = NEON_TOKEN
+)
+
+# Save the downloaded data to local CSV files for later use
+write.csv(beetles_humidity$RH_30min, "beetles_humidity.csv")
+write.csv(beetles_precipitation$PRIPRE_30min, "beetles_pri_precip.csv")
+write.csv(beetles_precipitation$SECPRE_30min, "beetles_sec_precip.csv")
+write.csv(beetles_precipitation$THRPRE_30min, "beetles_thr_precip.csv")
+write.csv(beetles_temperature_IR$IRBT_30_minute, "beetles_temperature_IR.csv")
+```
+
+
+```{r}
+# Read in locally stored CSV of reduced image data (generated in another script: Explore_export_metalist.R)
+# This file contains columns: pictureID, NEON_sampleID, siteID, genus, species, scientificName
+beetles_meta <- read.csv("Beetle_Meta.csv")
+
+# Extract the plot ID from the NEON_sampleID by taking the first 8 characters
+beetles_meta$plot <- substr(beetles_meta$NEON_sampleID, 1, 8)
+
+# Extract the date information from the NEON_sampleID and convert it to date format
+beetles_meta$date <- substr(beetles_meta$NEON_sampleID, 
+                            (nchar(beetles_meta$NEON_sampleID) - 10 - 7), 
+                            (nchar(beetles_meta$NEON_sampleID) - 10))
+beetles_meta$date <- as.POSIXct(strptime(beetles_meta$date, format = "%Y%m%d"))
+
+# Convert 'date' column from character to POSIXct (date-time format)
+beetles_meta <- beetles_meta %>%
+  mutate(date = as.POSIXct(date, format = "%Y-%m-%d"))
+
+# Set 'Start_date' as 12 days before 'date' and ensure both Start_date and End_date are in POSIXct format
+beetles_meta$Start_date <- as.POSIXct(as.Date(beetles_meta$date) - 12)
+beetles_meta$End_date <- beetles_meta$date
+
+# Check the structure and first few rows of beetles_meta
+str(beetles_meta)
+head(beetles_meta)
+```
+
+Abiotic Data Processing:
+```{r}
+# Display the first few rows of secondary precipitation data (30-min intervals)
+head(beetles_precipitation$SECPRE_30min)
+
+# Convert startDateTime to POSIXct format in precipitation and temperature dataframes
+precip_sec <- beetles_precipitation$SECPRE_30min
+precip_sec$startDateTime <- as.POSIXct(strptime(precip_sec$startDateTime, format = "%Y-%m-%d"))
+
+precip_thr <- beetles_precipitation$THRPRE_30min
+precip_thr$startDateTime <- as.POSIXct(strptime(precip_thr$startDateTime, format = "%Y-%m-%d"))
+
+# Sum the secondary precipitation data for each beetle observation
+sum_precip_sec <- beetles_meta %>%
+  rowwise() %>%
+  mutate(sum_precip_sec = ifelse(length(precip_sec$secPrecipBulk[
+                                      precip_sec$siteID == siteID & 
+                                      precip_sec$startDateTime >= Start_date & 
+                                      precip_sec$startDateTime <= End_date]) == 0,
+                              NA,
+                              sum(precip_sec$secPrecipBulk[
+                                      precip_sec$siteID == siteID & 
+                                      precip_sec$startDateTime >= Start_date & 
+                                      precip_sec$startDateTime <= End_date], na.rm = TRUE)))
+
+# Sum the tertiary precipitation data for each beetle observation
+sum_precip_thr <- beetles_meta %>%
+  rowwise() %>%
+  mutate(sum_precip_thr = ifelse(length(precip_thr$TFPrecipBulk[
+                                      precip_thr$siteID == siteID & 
+                                      precip_thr$startDateTime >= Start_date & 
+                                      precip_thr$startDateTime <= End_date]) == 0,
+                              NA,
+                              sum(precip_thr$TFPrecipBulk[
+                                      precip_thr$siteID == siteID & 
+                                      precip_thr$startDateTime >= Start_date & 
+                                      precip_thr$startDateTime <= End_date], na.rm = TRUE)))
+
+# Process and calculate the mean temperature for each beetle observation
+temp <- beetles_temperature_IR$IRBT_30_minute
+temp$startDateTime <- as.POSIXct(strptime(temp$startDateTime, format = "%Y-%m-%d"))
+
+mean_temp <- beetles_meta %>%
+  rowwise() %>%
+  mutate(mean_temp = ifelse(length(temp$bioTempMean[
+                                      temp$siteID == siteID & 
+                                      temp$startDateTime >= Start_date & 
+                                      temp$startDateTime <= End_date]) == 0,
+                              NA,
+                              mean(temp$bioTempMean[
+                                      temp$siteID == siteID & 
+                                      temp$startDateTime >= Start_date & 
+                                      temp$startDateTime <= End_date], na.rm = TRUE)))
+
+# Process and calculate the mean humidity for each beetle observation
+hum <- beetles_humidity$RH_30min
+hum$startDateTime <- as.POSIXct(strptime(hum$startDateTime, format = "%Y-%m-%d"))
+
+mean_hum <- beetles_meta %>%
+  rowwise() %>%
+  mutate(mean_hum = ifelse(length(hum$RHMean[
+                                      hum$siteID == siteID & 
+                                      hum$startDateTime >= Start_date & 
+                                      hum$startDateTime <= End_date]) == 0,
+                              NA,
+                              mean(hum$RHMean[
+                                      hum$siteID == siteID & 
+                                      hum$startDateTime >= Start_date & 
+                                      hum$startDateTime <= End_date], na.rm = TRUE)))
+```
+
+```{r}
+#Pull out the summary lines from all of the inefficient calculations in the last chunk
+#Put all of this into one dataframe
+beetles_full<-cbind(mean_hum, mean_temp[,12], sum_precip_thr[,12], sum_precip_sec[,12])
+```
+
+```{r}
+# Define a normalization function to scale numeric values between 0 and 1
+# This scales the values relative to their minimum and maximum, which is useful for comparisons
+normalize <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# Prepare the dataset for normalization by filtering out any rows that have NA or NaN values 
+# across the columns mean_hum, mean_temp, sum_precip_thr, sum_precip_sec, and date
+beetles_full_norm <- beetles_full %>%
+  filter(if_all(c(mean_hum, mean_temp, sum_precip_thr, sum_precip_sec, date),
+                ~ !is.na(.) & !is.nan(.))) %>%
+  mutate(
+    # Convert the 'date' column (which is in date-time format) to numeric format for normalization
+    # This is done to preserve temporal information for use in ecoPalette analysis
+    date = normalize(as.numeric(date)),
+    
+    # Apply the normalize function to scale the columns mean_hum, mean_temp, sum_precip_thr, and sum_precip_sec
+    # to a range between 0 and 1
+    across(c(mean_hum, mean_temp, sum_precip_thr, sum_precip_sec),
+           ~ normalize(.))
+  )
+
+# Create a new column 'date_norm' that stores the normalized date values for future use
+beetles_full_norm$date_norm <- beetles_full_norm$date
+
+# Write the normalized dataset to a CSV file for external use or further analysis
+write.csv(beetles_full_norm, "./beetles_full_norm.csv")
+
+```
